@@ -1,6 +1,5 @@
-# Crop Micronutrient Mapping in Ethiopia and Malawi
-
-This GitHub repository accompanies the paper:
+# hlikelihood-selected-inverse
+Fast direct h-likelihood estimation for irregular spatial data using a selected inverse algorithm, with applications to crop micronutrient mapping in Ethiopia and Malawi. This GitHub repository accompanies the paper:
 
 > Zou, H. and Mondal, D. (2026). *Fast Direct H-likelihood Estimation Using Selected Inverse for Irregular Spatial Data*
 
@@ -86,5 +85,4 @@ To reproduce the results:
 ## Citation
 
 > Zou, H. and Mondal, D. (2026). *Fast Direct H-likelihood Estimation Using Selected Inverse for Irregular Spatial Data*
-
 

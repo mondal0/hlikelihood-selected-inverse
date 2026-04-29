@@ -1,0 +1,283 @@
+---
+title: "Code for All Figures in Section 5"
+authors: "Hangcen Zou and Debashis Mondal"
+date: "`r Sys.Date()`"
+output: html_document
+fontsize: 11pt
+geometry: margin=1in
+---
+
+# Overview
+
+This document provides reproducible code for the figures presented in the main manuscript, including:
+
+1. Map of Africa
+2. Map of the sampling domain in Ethiopia
+3. Map of the sampling domain in Malawi
+4. BLUP of the spatial effect
+5. Level plot of the BLUP
+6. Log standard error of predictions
+7. 95% confidence interval plot of covariate effects
+
+
+# Libraries
+```{r}
+library(raster)
+library(readxl)
+library(fields)
+library(rnaturalearth)
+library(ggplot2)
+```
+
+
+# Load Data and Output
+```{r}
+#------------ Ethiopia ------------# 
+
+target.e <- read.csv("../Data/Ethiopia/Ethiopia_map.csv", header = TRUE) # Data
+teff_e <- read.csv("../Output/teff_e.txt", sep="") # Output
+location_e <- read.csv("../Output/location_e.txt", sep="") # Output
+
+ras_e <- rasterFromXYZ(target.e)
+grid_width <- 0.013
+ras_e_longitude <- seq(extent(ras_e)[1],extent(ras_e)[2],grid_width)
+ras_e_latitude <- seq(extent(ras_e)[3],extent(ras_e)[4],grid_width)
+z <- matrix(NA, nrow=length(ras_e_longitude), ncol=length(ras_e_latitude))
+
+
+#------------ Malawi ------------# 
+
+maize_m <- read.csv("../Output/maize_m.txt", sep="") # Output
+location_m <- read.csv("../Output/location_m.txt", sep="") # Output
+
+
+#------------ h-likelihood results ------------# 
+# should change to the desired result file name and corresponding path
+
+psi_hat <- unlist(read.table("../Output/ethiopia8_psi_hat.txt", quote="\"", comment.char=""))
+se_predict <- unlist(read.table("../Output/ethiopia8_se_predict.txt", quote="\"", comment.char=""))
+```
+
+
+# 1. Map of Africa
+```{r}
+africa <- ne_countries(continent = "Africa", returnclass = "sf")
+
+# highlight Ethiopia and Malawi 
+# Create a new column to specify the fill color
+africa$fill_color <- ifelse(africa$name %in% c("Malawi"), "black", "white")
+africa$fill_color[which(africa$name=="Ethiopia")] <- "black"
+# Plot the map with specified fill and border colors
+plot(africa["fill_color"], col = africa$fill_color, border = "black", main="")
+
+# create coordinates for the map
+# refer to https://en.wikipedia.org/wiki/Extreme_points_of_Africa
+par(fig = c(0.15, 0.85, 0.15, 0.85))
+plot(africa["fill_color"], col = africa$fill_color, border = "black", main="",cex.lab = 1.5,cex.axis = 1.3)
+# Overlay a new plot with a different coordinate system
+par(new = TRUE, fig = c(0.13, 0.8, 0, 0.95))
+plot(x=0, y=0, xlim=c(-17.3,51.3), ylim=c(-34.5,37.2), xlab = "Longitude", ylab = "Latitude", col="white",cex.lab = 1.5,cex.axis = 1.3)
+# back to default setting
+par(new = FALSE, fig = c(0, 1, 0, 1))
+```
+
+
+# 2. Map of Sample Domain in Ethiopia
+```{r}
+z[cbind(location_e$Longitude,location_e$Latitude)] <- 0
+
+# sample domain
+image(ras_e_longitude,ras_e_latitude,z,col="#eeeeee",xlab="Longitude",ylab="Latitue",cex.lab = 1.5,cex.axis = 1.3)
+# sampling location
+points(teff_e$Longitude,teff_e$Latitude,pch=16,cex=0.4)
+```
+
+
+# 3. Map of Sample Domain in Malawi
+```{r}
+# sample domain
+plot(location_m$Longitude,location_m$Latitude,pch=20,cex=0.5,col="#eeeeee",xlab='Longitude',ylab='Latitude',cex.lab = 1.5,cex.axis = 1.3)
+# sampling location
+points(maize_m$Longitude,maize_m$Latitude,pch=16,cex=0.4)
+```
+
+
+# 4. BLUP of Spatial Effect 
+```{r}
+#------------ Ethiopia ------------# 
+
+# BLUP values
+z[cbind(location_e$Longitude,location_e$Latitude)] <- psi_hat
+# plot
+image.plot(ras_e_longitude,ras_e_latitude,z,col=gray.colors(100,start=1,end=0),cex.lab=1.5,cex.axis=1.3,legend.width=0.8)
+
+
+#------------ Malawi ------------# 
+
+# create a function to generate a continuous color palette (light - small value)
+rbPal <- colorRampPalette(c('white','black'))
+# adds a column of color values based on the BLUP values
+Col <- rbPal(100)[as.numeric(cut(psi_hat,breaks = 100))]
+# plot
+plot(location_m$Longitude,location_m$Latitude,pch=20,cex=0.1,col=Col,xlab='Longitude',ylab='Latitude',cex.lab = 1.5,cex.axis = 1.3)
+# add legend
+info<- setupLegend()
+addLegend(info, col=rbPal(100), zlim = c(min(psi_hat),max(psi_hat)))
+
+```
+
+
+# 5. Level Plot of BLUP 
+```{r}
+#------------ Ethiopia ------------# 
+
+# number of levels
+n_colors <- 4
+# plot
+image.plot(ras_e_longitude,ras_e_latitude,z,col=gray.colors(n_colors,start=0.75,end=0),cex.lab = 1.5,cex.axis = 1.3,legend.width=0.8)
+
+
+#------------ Malawi ------------# 
+
+# number of levels
+n_colors <- 4
+# create a function to generate a continuous color palette (light - small value)
+rbPal <- colorRampPalette(c('lightgray','black'))
+# adds a column of color values based on the data values
+Col <- rbPal(n_colors)[as.numeric(cut(psi_hat,breaks = n_colors))]
+# plot
+plot(location_m$Longitude,location_m$Latitude,pch=20,cex=0.1,col=Col,xlab='Longitude',ylab='Latitude',cex.lab = 1.5,cex.axis = 1.3)
+# add legend
+info<- setupLegend()
+addLegend(info, col=rbPal(n_colors), zlim = c(min(psi_hat),max(psi_hat)))
+
+```
+
+
+# 6. Log Standard Error of Predictions
+```{r}
+#------------ Ethiopia ------------# 
+
+# log se values
+z[cbind(location_e$Longitude,location_e$Latitude)] <- log(se_predict)
+# plot
+image.plot(ras_e_longitude,ras_e_latitude,z,col=gray.colors(100,start=1,end=0),cex.lab = 1.5,cex.axis = 1.3,legend.width=0.8)
+
+
+#------------ Malawi ------------# 
+
+# create a function to generate a continuous color palette (light - small value)
+rbPal <- colorRampPalette(c('white','black'))
+# adds a column of color values based on the data values
+Col <- rbPal(100)[as.numeric(cut(log(se_predict),breaks = 100))]
+# plot
+plot(location_m$Longitude,location_m$Latitude,pch=20,cex=0.1,col=Col,xlab='Longitude',ylab='Latitude',cex.lab = 1.5,cex.axis = 1.3)
+# add legend
+info<- setupLegend()
+addLegend(info, col=rbPal(100), zlim = c(min(log(se_predict)),max(log(se_predict))))
+
+```
+
+
+# 7. 95% CI Plot of Covariate Effects
+```{r}
+# should change values in df based on actual results
+
+#--------------- Ethiopia ---------------#
+
+df <- data.frame(
+  model = rep(c("8-neighbor", "12-neighbor"), each = 3),
+  parameter = rep(c("beta_temp", "beta_prcp", "beta_ph"), 2),
+  estimate = c(0.05972, -0.00334, -2.03392,
+               0.05156, -0.00278, -1.78938),
+  se = c(0.02002, 0.00118, 0.44542,
+         0.02019, 0.00125, 0.43629)
+)
+
+df$model <- factor(df$model, levels = c("8-neighbor", "12-neighbor"))
+
+# compute 95% confidence intervals
+df <- df %>%
+  mutate(
+    lower = estimate - 1.96 * se,
+    upper = estimate + 1.96 * se
+  )
+
+# create a categorical order and readable parameter labels 
+df$parameter <- factor(df$parameter, 
+                       levels = c("beta_temp", "beta_prcp", "beta_ph"),
+                       labels = c(expression(Temperature), 
+                                  expression(Precipitation), expression(pH)))
+
+# plot
+ggplot(df, aes(x = parameter, y = estimate, 
+               color = model, group = model)) +
+  geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbar(aes(ymin = lower, ymax = upper),
+                position = position_dodge(width = 0.5),
+                width = 0.2, size = 0.8) +
+  geom_hline(yintercept = 0, linetype = "dotted", color = "gray40") +
+  scale_color_manual(values = c("black", "gray60"),
+                     name = "Neighborhood Model") +
+  labs(
+    x = NULL,
+    y = "Estimated covariate effect"
+  ) +
+  theme_minimal(base_size = 20) +
+  theme(
+    legend.position = "top",
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank()
+  )
+
+
+
+#--------------- Malawi ---------------#
+
+df <- data.frame(
+  model = rep(c("small", "large"), each = 2),
+  parameter = rep(c("beta_temp", "beta_tim"), 2),
+  estimate = c(0.08165, -0.12931,
+               0.08230, -0.12839),
+  se = c(0.00883, 0.07805,
+         0.00854, 0.07737)
+)
+
+# create a categorical order and readable parameter labels 
+df$parameter <- factor(df$parameter, 
+                       levels = c("beta_temp", "beta_tim"),
+                       labels = c(expression(Temperature), 
+                                  expression(TIM)))
+
+df$model <- factor(df$model, levels = c("small", "large"))
+
+# compute 95% confidence intervals
+df <- df %>%
+  mutate(
+    lower = estimate - 1.96 * se,
+    upper = estimate + 1.96 * se
+  )
+
+# plot
+ggplot(df, aes(x = parameter, y = estimate, 
+               color = model, group = model)) +
+  geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbar(aes(ymin = lower, ymax = upper),
+                position = position_dodge(width = 0.5),
+                width = 0.2, size = 0.8) +
+  geom_hline(yintercept = 0, linetype = "dotted", color = "gray40") +
+  scale_color_manual(values = c("black", "gray60"),
+                     name = "Neighborhood Model") +
+  labs(
+    x = NULL,
+    y = "Estimated covariate effect"
+  ) +
+  theme_minimal(base_size = 20) +
+  theme(
+    legend.position = "top",
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank()
+  )
+```
+
+

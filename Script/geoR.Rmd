@@ -1,0 +1,111 @@
+---
+title: "Code for Section 5: Analysis Using geoR"
+authors: "Hangcen Zou and Debashis Mondal"
+date: "`r Sys.Date()`"
+output: html_document
+fontsize: 11pt
+geometry: margin=1in
+---
+
+# library
+```{r}
+library(geoR)
+```
+
+# Ethiopia
+```{r}
+# load data
+teff_e <- read.csv("../Output/teff_e.txt", sep="") 
+
+# sample variance
+var(teff_e$Zn)
+
+# create geodata object
+geo_e <- as.geodata(data.frame(teff_e[c("Longitude","Latitude","Zn","Bio1","Bio12","ph")]), coords.col = 1:2, data.col = 3, covar.col = 4:6)
+
+# Matern model
+fit_e_matern <- likfit(geo_e,
+              trend = ~ -1 + Bio1 + Bio12 + ph,
+              cov.model = "matern",
+              ini.cov.pars = c(1, 0.2),  # (sigma^2, range)
+              nugget = 0.1,
+              kappa = 0.25,
+              fix.nugget = FALSE,
+              fix.kappa = FALSE,
+              lik.method = "REML")
+
+# exponential model
+fit_e_exp <- likfit(geo_e,
+              trend = ~ -1 + Bio1 + Bio12 + ph,
+              cov.model = "exponential",
+              ini.cov.pars = c(1, 0.2),  # (sigma^2, range)
+              nugget = 0.1,
+              fix.nugget = FALSE,
+              lik.method = "REML")
+
+# summary
+# note: Matern model fails
+summary(fit_e_exp)
+# Summary of the parameter estimation
+# 
+# Parameters of the spatial component:
+#    correlation function: exponential
+#       (estimated) variance parameter sigmasq (partial sill) =  1053
+#       (estimated) cor. fct. parameter phi (range parameter)  =  57.39
+# 
+# Parameter of the error component:
+#       (estimated) nugget =  11.86
+```
+
+
+# Malawi
+```{r}
+# load data
+maize_m <- read.csv("../Output/maize_m.txt", sep="")
+
+# sample variance
+var(maize_m$Zn)
+
+# create geodata object
+geo_m <- as.geodata(data.frame(maize_m[c("Longitude","Latitude","Zn","Bio1","TIM")]), coords.col = 1:2, data.col = 3, covar.col = 4:5)
+
+# Matern model
+fit_m_matern <- likfit(geo_m,
+              trend = ~ -1 + Bio1 + TIM,
+              cov.model = "matern",
+              ini.cov.pars = c(1, 0.2),  # (sigma^2, range)
+              nugget = 0.1,
+              kappa = 0.25,
+              fix.nugget = FALSE,
+              fix.kappa = FALSE,
+              lik.method = "REML")
+
+# summary
+summary(fit_m_matern)
+# Summary of the parameter estimation
+# 
+# Parameters of the spatial component:
+#    correlation function: matern
+#       (estimated) variance parameter sigmasq (partial sill) =  42.79
+#       (estimated) cor. fct. parameter phi (range parameter)  =  3830
+#       (estimated) extra parameter kappa = 0.1585
+# 
+# Parameter of the error component:
+#       (estimated) nugget =  14.03
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

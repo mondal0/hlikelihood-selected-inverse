@@ -1,0 +1,245 @@
+---
+title: "Code for Section 5: Mapping Zinc in Maize (Malawi)"
+authors: "Hangcen Zou and Debashis Mondal
+date: "`r Sys.Date()`"
+output: html_document
+fontsize: 11pt
+geometry: margin=1in
+---
+
+# Overview
+
+This document provides reproducible code for the analysis presented in the main manuscript. The workflow includes:
+
+1. Data loading and preprocessing
+2. Construction of proximity (adjacency) matrices
+3. Construction of the Laplacian matrix
+4. Construction of the F matrix
+5. REML parameter estimation via h-likelihood
+6. Results and output files
+
+---
+
+# Libraries
+```{r libraries, message=FALSE, warning=FALSE}
+library(raster)
+library(igraph)
+library(dplyr)
+library(Matrix)
+library(sparseinv)
+library(readxl)
+library(fields)
+library(MASS)
+library(spam)
+library(LatticeKrig)
+```
+
+
+# 1. Load Data
+```{r}
+# environmental and soil variables
+covariate_m <- read_excel("../Data/Malawi/Malawi_grain_soil.xlsx")
+colnames(covariate_m) <- c("Latitude","Longitude","Crop","Se","Zn","ph","N_pct","org","Bio1","Bio12","TIM")
+
+# subset maize data
+maize_m <- subset(covariate_m, Crop == "Maize")
+
+# remove missing values
+maize_m <- maize_m[complete.cases(maize_m[,c("ph","org","Bio1","Bio12","TIM","Zn")]),]
+maize_m <- maize_m[maize_m$Zn <= 77777,]
+
+n0_maize <- nrow(maize_m)
+
+# kriging target locations
+target_m <- read.csv("../Data/Malawi/Malawi_targets.csv")
+
+# combine locations
+location <- rbind(
+  as.matrix(maize_m[,c("Longitude","Latitude")]),
+  as.matrix(target_m)
+)
+
+n <- nrow(location)
+```
+
+
+# 2. Proximity / Adjacency Matrix
+```{r}
+# use LKDist to find pairwise distances within a maximum distance
+dis <- LKDist(location, location, delta = 0.01, distance.type = "Euclidean")
+
+# check average number of neighbors
+(length(dis$ra) - n) / n
+
+# uniform weights
+dis$ra <- ifelse(dis$ra > 0, 1, 0)
+
+# proximity/adjacency matrix
+adj_matrix <- as.dgCMatrix.spam(spind2spam(dis))
+diag(adj_matrix) <- 0
+```
+
+
+# 3. Laplacian Matrix
+```{r}
+# construct graph
+graph <- graph_from_adjacency_matrix(adj_matrix, weighted = TRUE)
+# check if the graph is connected
+is_connected(graph)
+
+# construct sparse Laplacian matrix
+Q <- laplacian_matrix(graph, sparse = TRUE)
+# check degrees
+summary(as.numeric(diag(Q)))
+# normalize the degree of each vertex 
+Q <- Q / mean(as.numeric(diag(Q)))
+# add perturbation
+Q <- Q + 1e-9 * Diagonal(n)
+# LDU Cholesky decomposition
+K <- Cholesky(Q, perm = TRUE, super = FALSE, LDL = TRUE)
+# expand the original compact representation 
+K0 <- expand2(K, LDL = TRUE)
+```
+
+
+# 4. F Matrix
+```{r}
+F_maize <- Matrix(0, nrow = n0_maize, ncol = n, sparse = TRUE)
+for(k in 1:n0_maize) F_maize[k,k] <- 1
+```
+
+
+# 5. REML Parameter Estimation via h-likelihood
+```{r}
+# choose zinc to analyze
+y <- as.matrix(maize_m[,"Zn"])
+
+# mean-zero design matrix x
+x <- apply(maize_m[,c("Bio1","TIM")], 2, function(x) x-mean(x))
+
+# covariates of gamma glm
+z1 <- c(rep(1,n0_maize), rep(0,n))
+z2 <- c(rep(0,n0_maize), diag(K0$D))
+
+# measure convergence
+ep <- 1
+# number of iterations
+dummy <- 1
+# initial parameter value
+lam0 <- 5 
+lam1 <- 2
+est_lam <- c(lam0, lam1)
+
+# keep track of valid locations
+valid_err_idx <- seq(1,n0_maize+n,1)
+valid_H_idx <- seq(1,n0_maize+n,1)
+
+# keep track of time used
+start_time <- Sys.time()
+
+# h-likelihood iteration
+while(ep>.00001){
+  # print iteration
+  print(dummy)
+  
+  # update parameters
+  lam0 <- est_lam[1]
+  lam1 <- est_lam[2]
+  
+  # augmented model
+  
+  # precision matrix with parameters
+  precision_matrix <- lam0*t(F_maize)%*%F_maize + lam1*Q
+  
+  # component of BLUP
+  ZgammaZ <- rbind(cbind(lam0*t(x)%*%x,lam0*t(x)%*%F_maize), cbind(lam0*t(F_maize)%*%x,precision_matrix))
+  
+  # BLUP
+  blup <- lam0*solve(ZgammaZ,rbind(t(x),t(F_maize))%*%y,sparse=T)
+  beta_hat <- blup[1:2]
+  psi_hat <- blup[-(1:2)]
+  
+  # error
+  err <- rbind(y-x%*%beta_hat-F_maize%*%psi_hat, -K0$L1.%*%K0$P1%*%psi_hat)
+  
+  
+  # gamma glm 
+  
+  # permutation matrix
+  permutation <- K0$P1.*1
+  # selected inverse of the precision matrix (match permutation with Cholesky decomposition)
+  TD_inv_precision <- Takahashi_Davis(Q=precision_matrix, P=permutation, return_perm_chol=1)
+  
+  # component of hat matrix
+  inv_pre_Fx <- solve(precision_matrix,lam0*t(F_maize)%*%x,sparse=T)
+  A <- lam0*t(x)%*%x - lam0*t(x)%*%F_maize%*%inv_pre_Fx
+  
+  # H11
+  H11 <- diag(lam0*(x-F_maize%*%inv_pre_Fx) %*% solve(A) %*% (t(x)-t(inv_pre_Fx)%*%t(F_maize)) + lam0*F_maize%*%TD_inv_precision$S%*%t(F_maize))
+  # H22
+  C <- K0$L1.%*%K0$P1%*%inv_pre_Fx%*%t(chol(solve(A)))
+  H22 <- lam1*rowSums(C^2)%*%K0$D + lam1*rowSums((K0$L1.%*%K0$P1%*%TD_inv_precision$S) * (K0$L1.%*%K0$P1) * diag(K0$D))
+  
+  # diagonal of hat matrix
+  H <- c(H11,as.array(H22))
+  
+  # response of gamma glm
+  res <- as.matrix(err^2/(1-H))
+  # valid locations for gamma glm
+  valid_err_idx <- intersect(valid_err_idx, which(err>10^(-6))) 
+  valid_H_idx <- intersect(valid_H_idx, which(H<1-10^(-6))) 
+  valid_idx <- intersect(valid_err_idx, valid_H_idx)
+  # gamma glm with default inverse link
+  lam.glm <- glm( res[valid_idx]~-1+z1[valid_idx]+z2[valid_idx],family=Gamma(), weights=(1-H[valid_idx]))
+  # estimation of lam0 and lam1
+  lam.new <- as.numeric(lam.glm$coeff)
+  
+  # updating
+  ep <- sum(abs(lam.new-est_lam)/est_lam)
+  print(lam.new)
+  est_lam <- lam.new
+  dummy <- dummy+1
+}
+
+Sys.time()-start_time
+```
+
+
+# 6. Results and Output Files
+```{r}
+#------------ Results ------------# 
+
+# BLUP
+beta_hat
+psi_hat
+# estimated precision parameters
+est_lam
+
+# standard error of beta 
+se_beta <- sqrt(diag(Takahashi_Davis(ZgammaZ))[1:2])
+# standard error of lambda 
+summary(lam.glm)
+
+# standard error of prediction 
+se_predict <- sqrt(diag(TD_inv_precision$S))
+
+# log REML likelihood
+2-lam.glm$aic/2
+
+
+#------------Output Files------------# 
+
+dir_path <- file.path("..", "Output")
+
+write(psi_hat, file = file.path(dir_path, "malawi_psi_hat.txt"), ncolumns = 1)
+write(se_beta, file = file.path(dir_path, "malawi_se_beta.txt"), ncolumns = 1)
+
+write.table(location, file = file.path(dir_path, "location_m.txt"),row.names = FALSE,col.names = TRUE)
+write.table(maize_m, file = file.path(dir_path, "maize_m.txt"),row.names = FALSE,col.names = TRUE)
+```
+
+
+
+
+
+
